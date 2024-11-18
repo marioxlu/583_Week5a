@@ -39,26 +39,34 @@ contract AMM is AccessControl {
         uint256 balanceA = ERC20(tokenA).balanceOf(address(this));
         uint256 balanceB = ERC20(tokenB).balanceOf(address(this));
         
-        // Apply fee reduction to input amount
+        // Calculate actual input after fee
+        // fee formula: actualInput = input * (10^4 - f)/10^4
         uint256 actualInput = (sellAmount * (10000 - feebps)) / 10000;
         
-        address outToken;
         uint256 outputAmount;
+        address outToken;
         
+        // Using the formula k = (Ai + ΔA) * (Bi - ΔB)
+        // Therefore ΔB = (Bi * ΔA) / (Ai + ΔA)
         if (sellToken == tokenA) {
             outToken = tokenB;
+            // Calculate output amount based on constant product formula
             outputAmount = (balanceB * actualInput) / (balanceA + actualInput);
+            
             require(ERC20(tokenA).transferFrom(msg.sender, address(this), sellAmount), "Transfer failed");
             require(ERC20(tokenB).transfer(msg.sender, outputAmount), "Transfer failed");
         } else {
             outToken = tokenA;
             outputAmount = (balanceA * actualInput) / (balanceB + actualInput);
+            
             require(ERC20(tokenB).transferFrom(msg.sender, address(this), sellAmount), "Transfer failed");
             require(ERC20(tokenA).transfer(msg.sender, outputAmount), "Transfer failed");
         }
 
+        // Emit swap event before updating invariant
         emit Swap(sellToken, outToken, sellAmount, outputAmount);
         
+        // Update and verify invariant
         uint256 new_invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
         require(new_invariant >= invariant, 'Bad trade');
         invariant = new_invariant;
@@ -70,19 +78,35 @@ contract AMM is AccessControl {
         uint256 balanceA = ERC20(tokenA).balanceOf(address(this));
         uint256 balanceB = ERC20(tokenB).balanceOf(address(this));
 
+        // Handle first liquidity provision
         if (invariant == 0) {
             require(amtA > 0 && amtB > 0, "Initial liquidity must include both tokens");
-        } else if (amtA > 0 && amtB > 0) {
-            require((balanceA * amtB) == (balanceB * amtA), "Incorrect ratio");
-        }
-
-        if (amtA > 0) {
             require(ERC20(tokenA).transferFrom(msg.sender, address(this), amtA), "Transfer A failed");
-        }
-        if (amtB > 0) {
             require(ERC20(tokenB).transferFrom(msg.sender, address(this), amtB), "Transfer B failed");
+        } 
+        // Handle subsequent liquidity provisions
+        else {
+            if (amtA > 0 && amtB > 0) {
+                // Check if the ratio matches the current pool ratio
+                require((balanceA * amtB) == (balanceB * amtA), "Incorrect ratio");
+                require(ERC20(tokenA).transferFrom(msg.sender, address(this), amtA), "Transfer A failed");
+                require(ERC20(tokenB).transferFrom(msg.sender, address(this), amtB), "Transfer B failed");
+            }
+            else if (amtA > 0) {
+                uint256 amtB_required = (balanceB * amtA) / balanceA;
+                require(ERC20(tokenA).transferFrom(msg.sender, address(this), amtA), "Transfer A failed");
+                require(ERC20(tokenB).transferFrom(msg.sender, address(this), amtB_required), "Transfer B failed");
+                amtB = amtB_required;
+            }
+            else {
+                uint256 amtA_required = (balanceA * amtB) / balanceB;
+                require(ERC20(tokenA).transferFrom(msg.sender, address(this), amtA_required), "Transfer A failed");
+                require(ERC20(tokenB).transferFrom(msg.sender, address(this), amtB), "Transfer B failed");
+                amtA = amtA_required;
+            }
         }
 
+        // Update invariant
         invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
         emit LiquidityProvision(msg.sender, amtA, amtB);
     }
