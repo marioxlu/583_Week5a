@@ -54,4 +54,51 @@ contract AMM is AccessControl {
             outToken = tokenA;
             outputAmount = (balanceA * actualInput) / (balanceB + actualInput);
             require(ERC20(tokenB).transferFrom(msg.sender, address(this), sellAmount), "Transfer failed");
-            require(ERC20(tokenA).transfer(msg.sender, outputAmount), "Tran
+            require(ERC20(tokenA).transfer(msg.sender, outputAmount), "Transfer failed");
+        }
+
+        emit Swap(sellToken, outToken, sellAmount, outputAmount);
+        
+        uint256 new_invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+        require(new_invariant >= invariant, 'Bad trade');
+        invariant = new_invariant;
+    }
+
+    function provideLiquidity(uint256 amtA, uint256 amtB) public {
+        require(amtA > 0 || amtB > 0, 'Cannot provide 0 liquidity');
+
+        uint256 balanceA = ERC20(tokenA).balanceOf(address(this));
+        uint256 balanceB = ERC20(tokenB).balanceOf(address(this));
+
+        if (invariant == 0) {
+            require(amtA > 0 && amtB > 0, "Initial liquidity must include both tokens");
+        } else if (amtA > 0 && amtB > 0) {
+            require((balanceA * amtB) == (balanceB * amtA), "Incorrect ratio");
+        }
+
+        if (amtA > 0) {
+            require(ERC20(tokenA).transferFrom(msg.sender, address(this), amtA), "Transfer A failed");
+        }
+        if (amtB > 0) {
+            require(ERC20(tokenB).transferFrom(msg.sender, address(this), amtB), "Transfer B failed");
+        }
+
+        invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+        emit LiquidityProvision(msg.sender, amtA, amtB);
+    }
+
+    function withdrawLiquidity(address recipient, uint256 amtA, uint256 amtB) public onlyRole(LP_ROLE) {
+        require(amtA > 0 || amtB > 0, 'Cannot withdraw 0');
+        require(recipient != address(0), 'Cannot withdraw to 0 address');
+        
+        if (amtA > 0) {
+            require(ERC20(tokenA).transfer(recipient, amtA), "Transfer A failed");
+        }
+        if (amtB > 0) {
+            require(ERC20(tokenB).transfer(recipient, amtB), "Transfer B failed");
+        }
+        
+        invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+        emit Withdrawal(msg.sender, recipient, amtA, amtB);
+    }
+}
